@@ -1,5 +1,10 @@
+pub struct Event {
+    pub header: String,
+    pub body: Option<String>,
+}
 
-
-pub struct Event{
-    pub event: String,
+impl Event {
+    pub fn new(header: String, body: Option<String>) -> Self {
+        Self { header, body }
+    }
 }

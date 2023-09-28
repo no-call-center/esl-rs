@@ -1,8 +1,9 @@
-mod error;
 mod conn;
+mod error;
 mod event;
 
 use crate::error::EslError;
+use event::Event;
 use futures::{SinkExt, StreamExt};
 use std::{
     collections::{HashMap, VecDeque},
@@ -68,6 +69,8 @@ impl Esl {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let stream = TcpStream::connect(addr).await?;
 
+        let (tx, rx) = channel::<Event>();
+
         let (mut read_half, mut write_half) = stream.into_split();
 
         tokio::spawn(async move {
@@ -80,35 +83,41 @@ impl Esl {
                 }
                 all_buf.extend_from_slice(&buf[..n]);
                 // 找头结束的地方
-                while let Some(header_end) = Self::get_header_end(&all_buf) {
-                    let header = &all_buf[..(header_end - 1)];
+                let header_end = match Self::get_header_end(&all_buf) {
+                    Some(header_end) => header_end,
+                    None => continue,
+                };
 
-                    let headers = Self::parse_header(header);
-                    // println!("headers: {:?}", headers);
-                    let header = String::from_utf8_lossy(header).to_string();
+                let header = &all_buf[..(header_end - 1)];
 
-                    // 如果key有 Content-Length，则获取后续长度为body
-                    let body = if let Some(content_length) = headers.get("Content-Length") {
-                        let content_length = content_length.trim().parse::<usize>().unwrap();
-                        // 如果没接收完，继续接收
-                        if content_length > all_buf.len() - header_end - 1 {
-                            break;
-                        }
-                        let body = String::from_utf8_lossy(
-                            &all_buf[(header_end + 1)..(header_end + 1 + content_length)],
-                        )
-                        .to_string();
-                        all_buf = all_buf[(header_end + 1 + content_length)..].to_vec();
-                        Some(body)
-                    } else {
-                        all_buf = all_buf[(header_end + 1)..].to_vec();
-                        None
-                    };
+                let headers = Self::parse_header(header);
+                // println!("headers: {:?}", headers);
+                let header = String::from_utf8_lossy(header).to_string();
 
-                    // println!("header: {:?}, ", String::from_utf8_lossy(header));
-                    println!("header: {}", header);
-                    println!("body: {}", body.unwrap_or_default());
-                }
+                // 如果key有 Content-Length，则获取后续长度为body
+                let body = if let Some(content_length) = headers.get("Content-Length") {
+                    let content_length = content_length.trim().parse::<usize>().unwrap();
+                    // 如果没接收完，继续接收
+                    if content_length > all_buf.len() - header_end - 1 {
+                        break;
+                    }
+                    let body = String::from_utf8_lossy(
+                        &all_buf[(header_end + 1)..(header_end + 1 + content_length)],
+                    )
+                    .to_string();
+                    all_buf = all_buf[(header_end + 1 + content_length)..].to_vec();
+                    Some(body)
+                } else {
+                    all_buf = all_buf[(header_end + 1)..].to_vec();
+                    None
+                };
+
+                // println!("header: {:?}, ", String::from_utf8_lossy(header));
+                println!("header: {}", header);
+                // println!("body: {}", body.unwrap_or_default());
+
+                let evt = Event::new(header, body);
+                tx.send(evt);
             }
         });
 
