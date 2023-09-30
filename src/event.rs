@@ -1,3 +1,4 @@
+#[derive(Debug, Clone, Default)]
 pub struct Event {
     pub header: String,
     pub body: Option<String>,

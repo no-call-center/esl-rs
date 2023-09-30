@@ -3,6 +3,7 @@ mod error;
 mod event;
 
 use crate::error::EslError;
+use conn::Conn;
 use event::Event;
 use futures::{SinkExt, StreamExt};
 use std::{
@@ -12,12 +13,11 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
     net::{TcpStream, ToSocketAddrs},
-    sync::{
-        oneshot::{channel, Sender},
-        Mutex,
-    },
+    sync::{mpsc::channel, Mutex},
 };
-pub struct Esl;
+pub struct Esl {
+    pub(crate) stream: TcpStream,
+}
 
 impl Esl {
     fn get_header_end(s: &[u8]) -> Option<usize> {
@@ -66,14 +66,21 @@ impl Esl {
     pub async fn inbound(
         addr: impl ToSocketAddrs,
         password: impl ToString,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Conn, Box<dyn std::error::Error>> {
         let stream = TcpStream::connect(addr).await?;
 
-        let (tx, rx) = channel::<Event>();
+        let (event_tx, event_rx) = channel::<Event>(1000);
+        let (command_tx, mut command_rx) = channel::<String>(1000);
 
         let (mut read_half, mut write_half) = stream.into_split();
 
+        let command_tx = Arc::new(Mutex::new(command_tx));
+
+        let command_tx1 = command_tx.clone();
+        let password = password.to_string();
+        // receive all event
         tokio::spawn(async move {
+            println!("receive event start");
             let mut all_buf = Vec::new();
             loop {
                 let mut buf = [0; 5000];
@@ -99,7 +106,7 @@ impl Esl {
                     let content_length = content_length.trim().parse::<usize>().unwrap();
                     // 如果没接收完，继续接收
                     if content_length > all_buf.len() - header_end - 1 {
-                        break;
+                        continue;;
                     }
                     let body = String::from_utf8_lossy(
                         &all_buf[(header_end + 1)..(header_end + 1 + content_length)],
@@ -115,30 +122,56 @@ impl Esl {
                 // println!("header: {:?}, ", String::from_utf8_lossy(header));
                 println!("header: {}", header);
                 // println!("body: {}", body.unwrap_or_default());
+                // if auth required
+                // if header.contains("auth/request") {
+                //     command_tx1
+                //         .lock()
+                //         .await
+                //         .send(format!("auth {}\n\n", password))
+                //         .await
+                //         .unwrap();
+                // }
 
                 let evt = Event::new(header, body);
-                tx.send(evt);
+                event_tx.send(evt).await.unwrap();
             }
+
+            println!("receive event end");
         });
 
-        write_half
-            .write(format!("auth {}\n\n", password.to_string()).as_bytes())
-            .await?;
+        // send command
+        tokio::spawn(async move {
+            println!("send command start");
+            loop {
+                let command = command_rx.recv().await.unwrap();
+                
+                write_half.write(command.as_bytes()).await.unwrap();
+                println!("send command: {}", command);
+            }
+            println!("send command end");
+        });
 
-        // 订阅所有事件
-        write_half.write(b"event json ALL\n\n").await?;
-
-        // 发起呼叫 1000 和 1001
-        write_half
-            .write(b"bgapi originate user/1001 &echo\n\n")
-            .await?;
-
-        // 等待100秒
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(100)).await;
+        {
+            command_tx1
+                .lock()
+                .await
+                .send(format!("auth {}\n\n", password))
+                .await
+                .unwrap();
         }
+        // write_half
+        //     .write(format!("auth {}\n\n", password.to_string()).as_bytes())
+        //     .await?;
 
-        Ok(())
+        // // 订阅所有事件
+        // write_half.write(b"event json ALL\n\n").await?;
+
+        // // 发起呼叫 1000 和 1001
+        // write_half
+        //     .write(b"bgapi originate user/1001 &echo\njob-uuid: 1234\n\n")
+        //     .await?;
+
+        Ok(Conn::new(command_tx, Arc::new(Mutex::new(event_rx))))
     }
 }
 
@@ -148,8 +181,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_inbound() {
-        Esl::inbound("47.97.119.174:8021", "admin888")
+        let mut conn = Esl::inbound("47.97.119.174:8021", "admin888")
             .await
             .unwrap();
+
+        println!("send");
+        // sleep 3s
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        conn.send("event json ALL\n\n").await.unwrap();
+        conn.send("bgapi originate user/1001 &echo\n\n").await.unwrap();
+
+        loop {
+            if let Ok(evt) = conn.recv().await {
+                println!("evt: {:?}", evt);
+            }
+        }
+
+        // sleep 30000s
+        tokio::time::sleep(std::time::Duration::from_secs(30000)).await;
     }
 }
