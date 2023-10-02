@@ -1,10 +1,10 @@
+use crate::error::{EslError, Result};
 use crate::event::Event;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{
     mpsc::{Receiver, Sender},
     Mutex,
 };
-
 #[derive(Debug, Clone)]
 pub struct Conn {
     pub(crate) connected: bool,
@@ -54,7 +54,7 @@ impl Conn {
             if *c == b':' {
                 is_key = false;
             } else if *c == b'\n' {
-                map.insert(key, value);
+                map.insert(key.to_lowercase(), value);
                 key = String::new();
                 value = String::new();
                 is_key = true;
@@ -67,20 +67,24 @@ impl Conn {
         map
     }
 
-    pub async fn send(&self, command: &str) -> Result<(), String> {
+    pub async fn send(&self, command: &str) -> Result<()> {
         if !self.connected {
-            return Err("not connected".to_string());
+            return Err(crate::error::EslError::ConnectionError(
+                "not connected".to_string(),
+            ));
         }
         let sender = self.sender.clone();
-        let command = command.to_string();
+        let command = format!("{}\n\n", command);
         sender.lock().await.send(command).await.unwrap();
         Ok(())
     }
 
     // receive event from freeswitch
-    pub async fn recv(&mut self) -> Result<Event, String> {
+    pub async fn recv(&mut self) -> Result<Event> {
         if !self.connected {
-            return Err("not connected".to_string());
+            return Err(crate::error::EslError::ConnectionError(
+                "not connected".to_string(),
+            ));
         }
         let event = self
             .receiver
@@ -88,7 +92,16 @@ impl Conn {
             .await
             .recv()
             .await
-            .ok_or("recv error")?;
+            .ok_or(EslError::ApiError("receive event error".to_string()))?;
+
         Ok(event)
+    }
+
+    pub async fn bgapi(&self, command: &str) -> Result<String> {
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let sender = self.sender.clone();
+        let command = format!("bgapi {}\njob-uuid:{}\n\n", command, uuid);
+        sender.lock().await.send(command).await.unwrap();
+        return Ok(uuid);
     }
 }

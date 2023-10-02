@@ -25,6 +25,8 @@ pub enum EslError {
     NoInput,
 }
 
+pub type Result<T> = std::result::Result<T, EslError>;
+
 impl From<std::io::Error> for EslError {
     fn from(error: std::io::Error) -> Self {
         Self::InternalError(error.to_string())
