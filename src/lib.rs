@@ -1,70 +1,21 @@
-mod conn;
-mod error;
-mod event;
+pub mod conn;
+pub mod error;
+pub mod event;
 
 use crate::error::EslError;
 use conn::Conn;
 use error::Result;
-use event::Event;
-use futures::{SinkExt, StreamExt};
-use std::{
-    collections::{HashMap, VecDeque},
-    f32::consts::E,
-    sync::Arc,
-};
+use event::{get_header_end, parse_header, Event};
+use std::sync::Arc;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, ToSocketAddrs},
     sync::{mpsc::channel, Mutex},
 };
-pub struct Esl {
-    pub(crate) stream: TcpStream,
-}
+
+pub struct Esl;
 
 impl Esl {
-    fn get_header_end(s: &[u8]) -> Option<usize> {
-        let mut i = 0;
-        let mut last = 0;
-        for c in s {
-            if *c == b'\n' {
-                if last == b'\n' {
-                    return Some(i);
-                }
-                last = *c;
-            } else {
-                last = *c;
-            }
-            i += 1;
-        }
-        None
-    }
-
-    fn parse_header(header: &[u8]) -> HashMap<String, String> {
-        /*
-        Content-Length: 603
-        Content-Type: text/event-json
-         */
-        let mut map = HashMap::new();
-        let mut key = String::new();
-        let mut value = String::new();
-        let mut is_key = true;
-        for c in header {
-            if *c == b':' {
-                is_key = false;
-            } else if *c == b'\n' {
-                map.insert(key, value);
-                key = String::new();
-                value = String::new();
-                is_key = true;
-            } else if is_key {
-                key.push(*c as char);
-            } else {
-                value.push(*c as char);
-            }
-        }
-        map
-    }
-
     pub async fn inbound(addr: impl ToSocketAddrs, password: impl ToString) -> Result<Conn> {
         let (event_tx, event_rx) = channel::<Event>(1000);
         let (command_tx, mut command_rx) = channel::<String>(1000);
@@ -82,6 +33,8 @@ impl Esl {
         let authed = Arc::new(Mutex::new(false));
         let auth_err = Arc::new(Mutex::new(Result::<()>::Err(EslError::AuthFailed)));
 
+        let conn = Conn::new(command_tx, Arc::new(Mutex::new(event_rx)));
+
         let authed1 = authed.clone();
         let auth_err1 = auth_err.clone();
         // receive all event
@@ -96,14 +49,14 @@ impl Esl {
                 }
                 all_buf.extend_from_slice(&buf[..n]);
                 // 找头结束的地方
-                let header_end = match Self::get_header_end(&all_buf) {
+                let header_end = match get_header_end(&all_buf) {
                     Some(header_end) => header_end,
                     None => continue,
                 };
 
                 let header = &all_buf[..(header_end - 1)];
 
-                let headers = Self::parse_header(header);
+                let headers = parse_header(header);
                 // log::debug!("headers: {:?}", headers);
                 let header = String::from_utf8_lossy(header).to_string();
 
@@ -181,7 +134,7 @@ impl Esl {
                     break;
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
         let auth_err = auth_err.lock().await;
@@ -189,7 +142,7 @@ impl Esl {
             return Err(e);
         }
         log::debug!("认证成功");
-        Ok(Conn::new(command_tx, Arc::new(Mutex::new(event_rx))))
+        Ok(conn)
     }
 }
 
@@ -201,18 +154,25 @@ mod tests {
     async fn test_inbound() {
         env_logger::init();
 
-        let mut conn = Esl::inbound("47.97.119.174:8021", "admin888")
+        let conn = Esl::inbound("47.97.119.174:8021", "admin888")
             .await
             .unwrap();
 
-        log::debug!("send");
-        conn.send("event json ALL").await.unwrap();
-        conn.send("bgapi originate user/1001 &echo").await.unwrap();
+        let conn1 = conn.clone();
+        // tokio::spawn(async move {
+        //     loop {
+        //         if let Ok(evt) = conn1.lock().await.recv().await {
+        //             println!("evt: {:#?}", evt);
+        //         }
+        //     }
+        // });
 
-        loop {
-            if let Ok(evt) = conn.recv().await {
-                log::debug!("evt: {:?}", evt);
-            }
-        }
+        // log::debug!("send");
+        // conn.lock().await.send("event json ALL").await.unwrap();
+        // conn.lock()
+        //     .await
+        //     .send("bgapi originate user/1001 &echo")
+        //     .await
+        //     .unwrap();
     }
 }

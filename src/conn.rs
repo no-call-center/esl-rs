@@ -24,49 +24,6 @@ impl Conn {
         }
     }
 
-    fn get_header_end(s: &[u8]) -> Option<usize> {
-        let mut i = 0;
-        let mut last = 0;
-        for c in s {
-            if *c == b'\n' {
-                if last == b'\n' {
-                    return Some(i);
-                }
-                last = *c;
-            } else {
-                last = *c;
-            }
-            i += 1;
-        }
-        None
-    }
-
-    fn parse_header(header: &[u8]) -> HashMap<String, String> {
-        /*
-        Content-Length: 603
-        Content-Type: text/event-json
-         */
-        let mut map = HashMap::new();
-        let mut key = String::new();
-        let mut value = String::new();
-        let mut is_key = true;
-        for c in header {
-            if *c == b':' {
-                is_key = false;
-            } else if *c == b'\n' {
-                map.insert(key.to_lowercase(), value);
-                key = String::new();
-                value = String::new();
-                is_key = true;
-            } else if is_key {
-                key.push(*c as char);
-            } else {
-                value.push(*c as char);
-            }
-        }
-        map
-    }
-
     pub async fn send(&self, command: &str) -> Result<()> {
         if !self.connected {
             return Err(crate::error::EslError::ConnectionError(
