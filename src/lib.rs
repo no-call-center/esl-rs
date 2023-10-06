@@ -117,7 +117,7 @@ impl Esl {
                 // println!("body: {}", body.unwrap_or_default());
 
                 let evt = Event::new(header, body);
-                tx.send(evt);
+                tx.clo.send(evt);
             }
         });
 
