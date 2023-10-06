@@ -19,69 +19,55 @@ impl Esl {
     pub async fn inbound(addr: impl ToSocketAddrs, password: impl ToString) -> Result<Conn> {
         let (event_tx, event_rx) = channel::<Event>(1000);
         let (command_tx, mut command_rx) = channel::<String>(1000);
-
         let command_tx = Arc::new(Mutex::new(command_tx));
-
         let command_tx1 = command_tx.clone();
-
         let password = password.to_string();
-
         let stream = TcpStream::connect(addr).await?;
-
         let (mut read_half, mut write_half) = stream.into_split();
-
         let authed = Arc::new(Mutex::new(false));
         let auth_err = Arc::new(Mutex::new(Result::<()>::Err(EslError::AuthFailed)));
-
         let conn = Conn::new(command_tx, Arc::new(Mutex::new(event_rx)));
-
         let authed1 = authed.clone();
         let auth_err1 = auth_err.clone();
         // receive all event
         tokio::spawn(async move {
-            log::debug!("receive event start");
             let mut all_buf = Vec::new();
             loop {
-                let mut buf = [0; 5000];
+                let mut buf = [0; 10240];
                 let n = read_half.read(&mut buf).await.unwrap();
                 if n == 0 {
                     break;
                 }
                 all_buf.extend_from_slice(&buf[..n]);
-                // 找头结束的地方
+
                 let header_end = match get_header_end(&all_buf) {
                     Some(header_end) => header_end,
                     None => continue,
                 };
 
-                let header = &all_buf[..(header_end - 1)];
+                let header = &all_buf[..header_end-1];
 
                 let headers = parse_header(header);
-                // log::debug!("headers: {:?}", headers);
                 let header = String::from_utf8_lossy(header).to_string();
 
-                // 如果key有 Content-Length，则获取后续长度为body
+                println!("all_buf: {:?}", String::from_utf8_lossy(&all_buf));
                 let body = if let Some(content_length) = headers.get("Content-Length") {
                     let content_length = content_length.trim().parse::<usize>().unwrap();
-                    // 如果没接收完，继续接收
-                    if content_length > all_buf.len() - header_end - 1 {
+                    // if recive data less than content_length, continue
+                    if content_length > all_buf.len() - header_end {
                         continue;
                     }
                     let body = String::from_utf8_lossy(
-                        &all_buf[(header_end + 1)..(header_end + 1 + content_length)],
+                        &all_buf[(header_end)..(header_end + content_length)],
                     )
                     .to_string();
-                    all_buf = all_buf[(header_end + 1 + content_length)..].to_vec();
+                    all_buf = all_buf[(header_end + content_length)..].to_vec();
                     Some(body)
                 } else {
-                    all_buf = all_buf[(header_end + 1)..].to_vec();
+                    all_buf = all_buf[(header_end)..].to_vec();
                     None
                 };
 
-                // log::debug!("header: {:?}, ", String::from_utf8_lossy(header));
-                log::debug!("header: {}", header);
-                // log::debug!("body: {}", body.unwrap_or_default());
-                // if auth required
                 if header.contains("auth/request") {
                     command_tx1
                         .lock()
@@ -97,7 +83,7 @@ impl Esl {
                     *auth_err = Ok(());
                     let mut authed = authed1.lock().await;
                     *authed = true;
-                    log::debug!("登录成功");
+                    log::debug!("auth success");
                 } else if header.contains("invalid") && header.contains("command/reply") {
                     let mut authed = authed1.lock().await;
                     if !*authed {
@@ -108,14 +94,13 @@ impl Esl {
                     }
                 }
 
-                let evt = Event::new(header, body);
+                log::debug!("raw header: {:?}", header);
+                log::debug!("raw body: {:?}", body);
+                let evt = Event::new(headers, body);
                 event_tx.send(evt).await.unwrap();
             }
-
-            log::debug!("receive event end");
         });
 
-        // send command
         tokio::spawn(async move {
             log::debug!("send command start");
             loop {
@@ -126,7 +111,6 @@ impl Esl {
             }
         });
 
-        // auth wait
         loop {
             {
                 let authed = authed.lock().await;

@@ -7,7 +7,7 @@ pub(crate) fn get_header_end(s: &[u8]) -> Option<usize> {
     for c in s {
         if *c == b'\n' {
             if last == b'\n' {
-                return Some(i);
+                return Some(i + 1);
             }
             last = *c;
         } else {
@@ -46,41 +46,40 @@ pub(crate) fn parse_header(header: &[u8]) -> HashMap<String, String> {
 
 #[derive(Debug, Clone, Default)]
 pub struct Event {
-    pub header: HashMap<String, String>,
+    pub headers: HashMap<String, String>,
+    pub raw_body: Option<String>,
     pub body: Option<HashMap<String, String>>,
 }
 
 impl Event {
-    pub fn new(header: String, body: Option<String>) -> Self {
-        let header = header
-            .split("\n")
-            .map(|s| {
-                let mut iter = s.split(":");
-                let key = iter.next().unwrap().trim().to_string();
-                let value = iter.next().unwrap().trim().to_string();
-                (key, value)
-            })
-            .collect::<HashMap<String, String>>();
+    pub fn new(headers: HashMap<String, String>, raw_body: Option<String>) -> Self {
         // 如果有body，则json反序列化解析body
-        let body = if let Some(body) = body {
-            let body = serde_json::from_str::<Value>(&body).unwrap();
-            let mut map = HashMap::new();
-            if let Value::Object(body) = body {
-                for (k, v) in body {
-                    if let Value::String(v) = v {
-                        map.insert(k, v);
+        let body = if let Some(body) = raw_body.clone() {
+            if let Ok(body) = serde_json::from_str::<Value>(&body) {
+                let mut map = HashMap::new();
+                if let Value::Object(body) = body {
+                    for (k, v) in body {
+                        if let Value::String(v) = v {
+                            map.insert(k, v);
+                        }
                     }
                 }
+                Some(map)
+            } else {
+                None
             }
-            Some(map)
         } else {
             None
         };
-        Self { header, body }
+        Self {
+            headers,
+            body,
+            raw_body,
+        }
     }
 
     pub fn get_header(&self, key: &str) -> Option<String> {
-        self.header.get(key).map(|s| s.to_string())
+        self.headers.get(key).map(|s| s.to_string())
     }
 
     pub fn get_job_uuid(&self) -> Option<String> {

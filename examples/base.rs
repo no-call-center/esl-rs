@@ -2,10 +2,14 @@ use env_logger::Env;
 use esl_rs::{self, Esl};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::io::Write;
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
+    // save to file
+    .format(|buf, record| writeln!(buf, "{} - {}", record.level(), record.args()))
+    .init();
 
     let conn = Esl::inbound("47.97.119.174:8021", "admin888")
         .await
@@ -28,7 +32,7 @@ async fn main() {
     });
     conn.lock()
         .await
-        .send("event json CHANNEL_CREATE CHANNEL_DESTROY CHANNEL_ANSWER BACKGROUND_JOB")
+        .send("event json CHANNEL_CREATE CHANNEL_DESTROY CHANNEL_ANSWER CHANNEL_HUGUP BACKGROUND_JOB")
         .await
         .unwrap();
     // 指定uuid
@@ -48,5 +52,5 @@ async fn main() {
 
 async fn handler(evt: esl_rs::event::Event, conn: Arc<Mutex<esl_rs::conn::Conn>>) {
     println!("evt: {:#?}", evt);
-    conn.lock().await.send("api uuid_kill all").await.unwrap();
+    conn.lock().await.send("api status").await.unwrap();
 }
