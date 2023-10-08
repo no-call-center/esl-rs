@@ -20,8 +20,9 @@ async fn main() {
 
     let mut conns = HashMap::new();
 
+    let fs1 = "47.97.119.174:8021";
     loop {
-        let conn = match Esl::inbound("47.97.119.174:8021", "admin888").await {
+        let conn = match Esl::inbound(fs1, "admin888").await {
             Ok(conn) => conn,
             Err(e) => {
                 log::error!("connect error: {}", e);
@@ -29,11 +30,11 @@ async fn main() {
             }
         };
 
-        conns.insert("1", Arc::new(Mutex::new(conn)));
+        conns.insert(fs1, Arc::new(Mutex::new(conn)));
 
         log::debug!("send");
 
-        let conn = match conns.get("1") {
+        let conn = match conns.get(fs1) {
             Some(conn) => conn.clone(),
             None => break,
         };
@@ -55,7 +56,8 @@ async fn main() {
         )
         .await
         .unwrap();
-        // 指定uuid
+
+        // custorm uuid
         let uuid = uuid::Uuid::new_v4().to_string();
         let r = conn
             .lock()
@@ -70,11 +72,10 @@ async fn main() {
 
         let result = run!(conn);
         log::error!("result: {:?}", result);
-        conns.remove("1");
+        conns.remove(fs1);
     }
 }
 
 async fn handler(evt: esl_rs::event::Event, conn: Arc<Mutex<esl_rs::conn::Conn>>) {
     println!("evt: {:#?}", evt);
-    conn.lock().await.send("api status").await;
 }

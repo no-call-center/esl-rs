@@ -2,7 +2,7 @@ pub mod conn;
 pub mod error;
 pub mod event;
 
-use crate::error::EslError;
+use crate::{error::EslError, event::EventData};
 use conn::Conn;
 use error::Result;
 use event::{get_header_end, parse_header, Event};
@@ -16,8 +16,6 @@ use tokio::{
 pub struct Esl;
 
 impl Esl {
-
-
     pub async fn inbound(addr: impl ToSocketAddrs, password: impl ToString) -> Result<Conn> {
         let (event_tx, event_rx) = channel::<Result<Event>>(1000);
         let (command_tx, mut command_rx) = channel::<String>(1000);
@@ -122,14 +120,19 @@ impl Esl {
 
                 log::debug!("raw header: {:?}", header);
                 log::debug!("raw body: {:?}", body);
-                let evt = Event::new(headers, body);
+                let evt = EventData::new(headers, body).into();
                 if let Err(e) = event_tx.send(Ok(evt)).await {
                     log::error!("send event error: {}", e);
                     break;
                 };
             }
             log::debug!("event channel closed");
-            if let Err(e) = event_tx.send(Err(EslError::ConnectionError)).await {
+            if let Err(e) = event_tx
+                .send(Err(EslError::ConnectionError(
+                    "event channel closed".to_string(),
+                )))
+                .await
+            {
                 log::error!("send event error: {}", e);
             };
             event_tx.closed().await;
@@ -146,7 +149,12 @@ impl Esl {
                     break;
                 };
             }
-            if let Err(e) = event_tx1.send(Err(EslError::ConnectionError)).await {
+            if let Err(e) = event_tx1
+                .send(Err(EslError::ConnectionError(
+                    "event channel closed".to_string(),
+                )))
+                .await
+            {
                 log::error!("write command error event: {}", e);
             };
             event_tx1.closed().await;

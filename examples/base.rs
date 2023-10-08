@@ -8,7 +8,9 @@ async fn main() {
 
     conn.handle(|evt| println!("evt: {:#?}", evt)).await;
 
-    conn.send("api reloadxml").await.unwrap();
+    
+    conn.subscribe_all().await.unwrap();
+    conn.api("reloadxml").await.unwrap();
 
     let err = loop {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;

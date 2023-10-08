@@ -13,8 +13,8 @@ pub enum EslError {
     #[error("Acl rejected.")]
     AclRejected,
 
-    #[error("Unable to connect to destination server.")]
-    ConnectionError,
+    #[error("connect error: {0:?}")]
+    ConnectionError(String),
 
     #[error("empty event")]
     EmptyEvent,
@@ -36,17 +36,12 @@ impl From<std::io::Error> for EslError {
         Self::InternalError(error.to_string())
     }
 }
-impl From<tokio::sync::oneshot::error::RecvError> for EslError {
-    fn from(error: tokio::sync::oneshot::error::RecvError) -> Self {
-        Self::InternalError(error.to_string())
-    }
-}
 
 impl From<tokio::sync::mpsc::error::TryRecvError> for EslError {
     fn from(error: tokio::sync::mpsc::error::TryRecvError) -> Self {
         match error {
             tokio::sync::mpsc::error::TryRecvError::Empty => Self::EmptyEvent,
-            tokio::sync::mpsc::error::TryRecvError::Disconnected => Self::ConnectionError,
+            tokio::sync::mpsc::error::TryRecvError::Disconnected => Self::ConnectionError(error.to_string()),
         }
     }
 }
