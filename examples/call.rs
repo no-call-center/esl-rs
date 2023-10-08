@@ -42,7 +42,7 @@ async fn main() {
         .lock()
         .await
         .bgapi(&format!(
-            "originate [call_id=123456][ignore_early_media=true][origination_uuid=111111]user/1001 &park",
+            "originate [call-id=3iM0sz-Xv7osRIh2WOBGqw..][ignore_early_media=true][origination_uuid=444444]user/1000 &park",
         ))
         .await
         .unwrap();
@@ -67,21 +67,21 @@ async fn handler(evt: esl_rs::event::Event, conn: Arc<Mutex<esl_rs::conn::Conn>>
             log::info!("call_id: {:?}", call_id);
 
             if let Some(leg) = v.get_var("origination_uuid") {
-                if leg == "111111" {
+                if leg == "444444" {
                     let r = conn
                     .lock()
                     .await
                     .bgapi(&format!(
-                        "originate [call_id=123456][ignore_early_media=true][origination_uuid=222222]user/1002 &park",
+                        "originate [ignore_early_media=true][origination_uuid=333333]user/1001 &park",
                     ))
                     .await
                     .unwrap();
-                } else if leg == "222222" {
+                } else if leg == "333333" {
                     // bridge
                     let r = conn
                         .lock()
                         .await
-                        .api(&format!("uuid_bridge {} {} both", leg, "111111"))
+                        .api(&format!("uuid_bridge {} {} both", leg, "444444"))
                         .await
                         .unwrap();
                 }
