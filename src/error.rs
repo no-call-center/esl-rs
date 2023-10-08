@@ -3,8 +3,6 @@ use std::num::ParseIntError;
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Ord, PartialOrd, Eq, Hash, Error)]
-#[allow(missing_docs)]
-/// Error type for Esl
 pub enum EslError {
     #[error("unknown error")]
     InternalError(String),
@@ -12,8 +10,14 @@ pub enum EslError {
     #[error("Wrong password.")]
     AuthFailed,
 
+    #[error("Acl rejected.")]
+    AclRejected,
+
     #[error("Unable to connect to destination server.")]
-    ConnectionError(String),
+    ConnectionError,
+
+    #[error("empty event")]
+    EmptyEvent,
 
     #[error("{0:?}")]
     ApiError(String),
@@ -25,6 +29,8 @@ pub enum EslError {
     NoInput,
 }
 
+pub type Result<T> = std::result::Result<T, EslError>;
+
 impl From<std::io::Error> for EslError {
     fn from(error: std::io::Error) -> Self {
         Self::InternalError(error.to_string())
@@ -35,6 +41,16 @@ impl From<tokio::sync::oneshot::error::RecvError> for EslError {
         Self::InternalError(error.to_string())
     }
 }
+
+impl From<tokio::sync::mpsc::error::TryRecvError> for EslError {
+    fn from(error: tokio::sync::mpsc::error::TryRecvError) -> Self {
+        match error {
+            tokio::sync::mpsc::error::TryRecvError::Empty => Self::EmptyEvent,
+            tokio::sync::mpsc::error::TryRecvError::Disconnected => Self::ConnectionError,
+        }
+    }
+}
+
 impl From<serde_json::Error> for EslError {
     fn from(error: serde_json::Error) -> Self {
         Self::InternalError(error.to_string())

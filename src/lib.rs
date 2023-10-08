@@ -1,144 +1,175 @@
-mod conn;
-mod error;
-mod event;
+pub mod conn;
+pub mod error;
+pub mod event;
 
 use crate::error::EslError;
-use event::Event;
-use futures::{SinkExt, StreamExt};
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
+use conn::Conn;
+use error::Result;
+use event::{get_header_end, parse_header, Event};
+use std::sync::Arc;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, ToSocketAddrs},
-    sync::{
-        oneshot::{channel, Sender},
-        Mutex,
-    },
+    sync::{mpsc::channel, Mutex},
 };
-pub struct Esl;
+
+pub struct Esl{
+    addr: String,
+    password: String,
+}
 
 impl Esl {
-    fn get_header_end(s: &[u8]) -> Option<usize> {
-        let mut i = 0;
-        let mut last = 0;
-        for c in s {
-            if *c == b'\n' {
-                if last == b'\n' {
-                    return Some(i);
-                }
-                last = *c;
-            } else {
-                last = *c;
-            }
-            i += 1;
-        }
-        None
-    }
-
-    fn parse_header(header: &[u8]) -> HashMap<String, String> {
-        /*
-        Content-Length: 603
-        Content-Type: text/event-json
-         */
-        let mut map = HashMap::new();
-        let mut key = String::new();
-        let mut value = String::new();
-        let mut is_key = true;
-        for c in header {
-            if *c == b':' {
-                is_key = false;
-            } else if *c == b'\n' {
-                map.insert(key, value);
-                key = String::new();
-                value = String::new();
-                is_key = true;
-            } else if is_key {
-                key.push(*c as char);
-            } else {
-                value.push(*c as char);
-            }
-        }
-        map
-    }
-
-    pub async fn inbound(
-        addr: impl ToSocketAddrs,
-        password: impl ToString,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect(addr: impl ToSocketAddrs, password: impl ToString) -> Result<Conn> {
+        let (event_tx, event_rx) = channel::<Result<Event>>(1000);
+        let (command_tx, mut command_rx) = channel::<String>(1000);
+        let command_tx = Arc::new(Mutex::new(command_tx));
+        let command_tx1 = command_tx.clone();
+        let password = password.to_string();
         let stream = TcpStream::connect(addr).await?;
-
-        let (tx, rx) = channel::<Event>();
-
         let (mut read_half, mut write_half) = stream.into_split();
+        let authed = Arc::new(Mutex::new(false));
+        let auth_err = Arc::new(Mutex::new(Result::<()>::Err(EslError::AuthFailed)));
+        let event_receiver = Arc::new(Mutex::new(event_rx));
+        let conn = Conn::new(command_tx, event_receiver);
+        let authed1 = authed.clone();
+        let auth_err1 = auth_err.clone();
 
+        let event_tx1 = event_tx.clone();
+        // receive all event
         tokio::spawn(async move {
             let mut all_buf = Vec::new();
             loop {
-                let mut buf = [0; 5000];
-                let n = read_half.read(&mut buf).await.unwrap();
+                let mut buf = [0; 10240];
+                let n = match read_half.read(&mut buf).await {
+                    Ok(n) => n,
+                    Err(e) => {
+                        log::error!("read event error: {:#?}", e);
+
+                        break;
+                    }
+                };
                 if n == 0 {
+                    log::error!("read error, empty data");
                     break;
                 }
                 all_buf.extend_from_slice(&buf[..n]);
-                // 找头结束的地方
-                let header_end = match Self::get_header_end(&all_buf) {
+
+                let header_end = match get_header_end(&all_buf) {
                     Some(header_end) => header_end,
                     None => continue,
                 };
 
-                let header = &all_buf[..(header_end - 1)];
+                let header = &all_buf[..header_end - 1];
 
-                let headers = Self::parse_header(header);
-                // println!("headers: {:?}", headers);
+                let headers = parse_header(header);
                 let header = String::from_utf8_lossy(header).to_string();
 
-                // 如果key有 Content-Length，则获取后续长度为body
+                log::debug!("all_buf: {:?}", String::from_utf8_lossy(&all_buf));
                 let body = if let Some(content_length) = headers.get("Content-Length") {
-                    let content_length = content_length.trim().parse::<usize>().unwrap();
-                    // 如果没接收完，继续接收
-                    if content_length > all_buf.len() - header_end - 1 {
-                        break;
+                    let content_length = match content_length.trim().parse::<usize>() {
+                        Ok(content_length) => content_length,
+                        Err(e) => {
+                            log::error!("parse content_length error: {}", e);
+                            break;
+                        }
+                    };
+                    // if recive data less than content_length, continue
+                    if content_length > all_buf.len() - header_end {
+                        continue;
                     }
                     let body = String::from_utf8_lossy(
-                        &all_buf[(header_end + 1)..(header_end + 1 + content_length)],
+                        &all_buf[(header_end)..(header_end + content_length)],
                     )
                     .to_string();
-                    all_buf = all_buf[(header_end + 1 + content_length)..].to_vec();
+                    all_buf = all_buf[(header_end + content_length)..].to_vec();
                     Some(body)
                 } else {
-                    all_buf = all_buf[(header_end + 1)..].to_vec();
+                    all_buf = all_buf[(header_end)..].to_vec();
                     None
                 };
 
-                // println!("header: {:?}, ", String::from_utf8_lossy(header));
-                println!("header: {}", header);
-                // println!("body: {}", body.unwrap_or_default());
+                if header.contains("auth/request") {
+                    command_tx1
+                        .lock()
+                        .await
+                        .send(format!("auth {}\n\n", password))
+                        .await
+                        .expect("send auth error");
+                    continue;
+                } else if header.contains("command/reply") && header.contains("invalid") {
+                    let mut authed = authed1.lock().await;
+                    if !*authed {
+                        *authed = true;
 
-                let evt = Event::new(header, body);
-                tx.clo.send(evt);
+                        let mut auth_err = auth_err1.lock().await;
+                        *auth_err = Err(EslError::AuthFailed);
+                    }
+                } else if header.contains("Reply-Text: +OK accepted")
+                    && header.contains("command/reply")
+                {
+                    let mut auth_err = auth_err1.lock().await;
+                    *auth_err = Ok(());
+                    let mut authed = authed1.lock().await;
+                    *authed = true;
+                    log::debug!("auth success");
+                } else if header.contains("text/rude-rejection") {
+                    let mut authed = authed1.lock().await;
+                    if !*authed {
+                        *authed = true;
+
+                        let mut auth_err = auth_err1.lock().await;
+                        *auth_err = Err(EslError::AclRejected);
+                    }
+                }
+
+                log::debug!("raw header: {:?}", header);
+                log::debug!("raw body: {:?}", body);
+                let evt = Event::new(headers, body);
+                if let Err(e) = event_tx.send(Ok(evt)).await {
+                    log::error!("send event error: {}", e);
+                    break;
+                };
             }
+            log::debug!("event channel closed");
+            if let Err(e) = event_tx.send(Err(EslError::ConnectionError)).await {
+                log::error!("send event error: {}", e);
+            };
+            event_tx.closed().await;
+            log::debug!("event channel closed success");
         });
 
-        write_half
-            .write(format!("auth {}\n\n", password.to_string()).as_bytes())
-            .await?;
+        tokio::spawn(async move {
+            loop {
+                let command = command_rx.recv().await.expect("receive command error");
 
-        // 订阅所有事件
-        write_half.write(b"event json ALL\n\n").await?;
+                log::debug!("send command: {}", command);
+                if let Err(e) = write_half.write(command.as_bytes()).await {
+                    log::error!("write command error: {}", e);
+                    break;
+                };
+            }
+            if let Err(e) = event_tx1.send(Err(EslError::ConnectionError)).await {
+                log::error!("write command error event: {}", e);
+            };
+            event_tx1.closed().await;
+        });
 
-        // 发起呼叫 1000 和 1001
-        write_half
-            .write(b"bgapi originate user/1001 &echo\n\n")
-            .await?;
-
-        // 等待100秒
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(100)).await;
+            {
+                let authed = authed.lock().await;
+                if *authed {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        Ok(())
+        let auth_err = auth_err.lock().await;
+        if let Err(e) = auth_err.clone() {
+            return Err(e);
+        }
+        log::info!("auth success");
+        Ok(conn)
     }
 }
 
@@ -148,8 +179,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_inbound() {
-        Esl::inbound("47.97.119.174:8021", "admin888")
+        env_logger::init();
+
+        let conn = Esl::connect("47.97.119.174:8021", "admin888")
             .await
             .unwrap();
+
+        let conn1 = conn.clone();
+        // tokio::spawn(async move {
+        //     loop {
+        //         if let Ok(evt) = conn1.lock().await.recv().await {
+        //             println!("evt: {:#?}", evt);
+        //         }
+        //     }
+        // });
+
+        // log::debug!("send");
+        // conn.lock().await.send("event json ALL").await.unwrap();
+        // conn.lock()
+        //     .await
+        //     .send("bgapi originate user/1001 &echo")
+        //     .await
+        //     .unwrap();
     }
 }
