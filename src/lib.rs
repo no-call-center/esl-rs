@@ -13,13 +13,12 @@ use tokio::{
     sync::{mpsc::channel, Mutex},
 };
 
-pub struct Esl{
-    addr: String,
-    password: String,
-}
+pub struct Esl;
 
 impl Esl {
-    pub async fn connect(addr: impl ToSocketAddrs, password: impl ToString) -> Result<Conn> {
+
+
+    pub async fn inbound(addr: impl ToSocketAddrs, password: impl ToString) -> Result<Conn> {
         let (event_tx, event_rx) = channel::<Result<Event>>(1000);
         let (command_tx, mut command_rx) = channel::<String>(1000);
         let command_tx = Arc::new(Mutex::new(command_tx));
@@ -44,7 +43,6 @@ impl Esl {
                     Ok(n) => n,
                     Err(e) => {
                         log::error!("read event error: {:#?}", e);
-
                         break;
                     }
                 };
@@ -181,7 +179,7 @@ mod tests {
     async fn test_inbound() {
         env_logger::init();
 
-        let conn = Esl::connect("47.97.119.174:8021", "admin888")
+        let conn = Esl::inbound("47.97.119.174:8021", "admin888")
             .await
             .unwrap();
 

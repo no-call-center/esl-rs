@@ -8,8 +8,8 @@ use tokio::sync::{
 #[derive(Debug, Clone)]
 pub struct Conn {
     pub(crate) sender: Arc<Mutex<Sender<String>>>, // send command
-    pub receiver: Arc<Mutex<Receiver<Result<Event>>>>, // receive freesiwtch event
-    pub connected: Arc<Mutex<bool>>,
+    pub(crate) receiver: Arc<Mutex<Receiver<Result<Event>>>>, // receive freesiwtch event
+    pub(crate) connected: Arc<Mutex<bool>>,
 }
 
 #[macro_export]
