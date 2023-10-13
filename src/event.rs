@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref, os::raw};
 
 pub(crate) fn get_header_end(s: &[u8]) -> Option<usize> {
     let mut i = 0;
@@ -40,100 +40,6 @@ pub(crate) fn parse_header(header: &[u8]) -> HashMap<String, String> {
     map
 }
 
-/*
-
-
-    public final static String API = "API";
-
-    public final static String HEARTBEAT = "HEARTBEAT";
-
-    public final static String RECV_RTCP_MESSAGE = "RECV_RTCP_MESSAGE";
-
-    public final static String CHANNEL_CREATE = "CHANNEL_CREATE";
-
-    public final static String CHANNEL_ORIGINATE = "CHANNEL_ORIGINATE";
-
-    public final static String CHANNEL_STATE = "CHANNEL_STATE";
-
-    public final static String CHANNEL_PROGRESS = "CHANNEL_PROGRESS";
-
-    public final static String CHANNEL_CALLSTATE = "CHANNEL_CALLSTATE";
-
-    public final static String CALL_UPDATE = "CALL_UPDATE";
-
-    public final static String CHANNEL_EXECUTE = "CHANNEL_EXECUTE";
-
-    public final static String CHANNEL_PARK = "CHANNEL_PARK";
-
-    public final static String CHANNEL_UNPARK = "CHANNEL_UNPARK";
-
-    public final static String PRIVATE_COMMAND = "PRIVATE_COMMAND";
-
-    public final static String PRESENCE_IN = "PRESENCE_IN";
-
-    public final static String CHANNEL_EXECUTE_COMPLETE = "CHANNEL_EXECUTE_COMPLETE";
-
-    public final static String CHANNEL_HANGUP = "CHANNEL_HANGUP";
-
-    public final static String CHANNEL_HANGUP_COMPLETE = "CHANNEL_HANGUP_COMPLETE";
-
-    public final static String CHANNEL_OUTGOING = "CHANNEL_OUTGOING";
-
-    public final static String CHANNEL_ANSWER = "CHANNEL_ANSWER";
-
-    public final static String CHANNEL_DESTROY = "CHANNEL_DESTROY";
-
-    public final static String CHANNEL_BRIDGE = "CHANNEL_BRIDGE";
-
-    public final static String RECORD_START = "RECORD_START";
-
-    public final static String MEDIA_BUG_START = "MEDIA_BUG_START";
-
-    public final static String MEDIA_BUG_STOP = "MEDIA_BUG_STOP";
-
-    public final static String PLAYBACK_START = "PLAYBACK_START";
-
-    public final static String PLAYBACK_STOP = "PLAYBACK_STOP";
-
-    public final static String CHANNEL_UNBRIDGE = "CHANNEL_UNBRIDGE";
-
-    public final static String DETECTED_SPEECH = "DETECTED_SPEECH";
-
-    public final static String CODEC = "CODEC";
-
-    public final static String RECV_INFO = "RECV_INFO";
-
-    public final static String DTMF = "DTMF";
-
-    public final static String DTMF_SEND = "DTMF_SEND";
-
-    public final static String SEND_DTMF = "SEND_DTMF";
-
-    public final static String DEL_SCHEDULE = "DEL_SCHEDULE";
-
-    public final static String RE_SCHEDULE = "RE_SCHEDULE";
-
-    public final static String ADD_SCHEDULE = "ADD_SCHEDULE";
-
-    public final static String CHANNEL_PROGRESS_MEDIA = "CHANNEL_PROGRESS_MEDIA";
-
-    public final static String RECORD_STOP = "RECORD_STOP";
-
-    public final static String CUSTOM = "CUSTOM";
-
-    public final static String RING_ASR = "RING_ASR";
-
-    public final static String RELOADXML = "RELOADXML";
-
-    public final static String CHANNEL_HOLD = "CHANNEL_HOLD";
-
-    public final static String CHANNEL_UNHOLD = "CHANNEL_UNHOLD";
-
-    public final static String CONFIRMED = "confirmed";
-
-    public final static String CONFERENCE_SEND_PRESENCE = "conference_send_presence";
-
-*/
 #[derive(Debug, Clone, strum::Display)]
 pub enum Event {
     Api(EventData),
@@ -321,8 +227,8 @@ impl EventData {
         };
         Self {
             headers,
+            raw_body: if body.is_none() { raw_body } else { None },
             body,
-            raw_body,
         }
     }
 

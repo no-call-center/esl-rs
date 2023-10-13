@@ -5,6 +5,9 @@ use tokio::sync::{
     mpsc::{Receiver, Sender},
     Mutex,
 };
+use tracing::{info, error, warn};
+use tracing_subscriber::FmtSubscriber;
+
 #[derive(Debug, Clone)]
 pub struct Conn {
     pub(crate) sender: Arc<Mutex<Sender<String>>>, // send command
@@ -54,7 +57,7 @@ impl Conn {
         match sender.send(command).await {
             Ok(_) => {}
             Err(e) => {
-                log::error!("send command error: {}", e);
+                error!("send command error: {}", e);
                 *self.connected.lock().await = false;
                 return Err(EslError::ConnectionError(String::from(
                     "send command error",
@@ -75,7 +78,7 @@ impl Conn {
                 if let Ok(evt) = res {
                     hander(evt);
                 } else if let Err(e) = res {
-                    log::error!("recv error: {}", e);
+                    error!("recv error: {}", e);
                     *connected.lock().await = false;
                 }
             }

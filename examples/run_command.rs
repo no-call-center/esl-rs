@@ -1,20 +1,27 @@
-use env_logger::Env;
 use esl_rs::run;
 use esl_rs::{self, Esl};
 use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 async fn main() {
-    let target = Box::new(File::create("./tmp.log").expect("Can't create file"));
-    env_logger::Builder::from_env(Env::default().default_filter_or("error"))
-        .format(|buf, record| writeln!(buf, "{} - {}", record.level(), record.args()))
-        .filter(None, log::LevelFilter::Debug)
-        .write_style(env_logger::WriteStyle::Always)
-        .target(env_logger::Target::Pipe(target))
-        .init();
+    // let target = Box::new(File::create("./tmp.log").expect("Can't create file"));
+    // env_logger::Builder::from_env(Env::default().default_filter_or("error"))
+    //     .format(|buf, record| writeln!(buf, "{} - {}", record.level(), record.args()))
+    //     .filter(None, LevelFilter::Debug)
+    //     .write_style(env_logger::WriteStyle::Always)
+    //     .target(env_logger::Target::Pipe(target))
+    //     .init();
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set the global default subscriber");
 
     let fs1 = "47.97.119.174:8021";
 
@@ -39,7 +46,7 @@ async fn main() {
             "CHANNEL_CREATE",
             "CHANNEL_DESTROY",
             "CHANNEL_ANSWER",
-            "CHANNEL_HUGUP",
+            "CHANNEL_HANGUP",
             "CHANNEL_HANGUP_COMPLETE",
             "BACKGROUND_JOB",
         ])
@@ -57,10 +64,10 @@ async fn main() {
         ))
         .await
         .unwrap();
-    log::debug!("r: {:?}", r);
+    debug!("r: {:?}", r);
 
     let result = run!(conn);
-    log::error!("result: {:?}", result);
+    error!("result: {:?}", result);
 }
 
 async fn handler(evt: esl_rs::event::Event, conn: Arc<Mutex<esl_rs::conn::Conn>>) {

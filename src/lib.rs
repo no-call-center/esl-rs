@@ -12,6 +12,7 @@ use tokio::{
     net::{TcpStream, ToSocketAddrs},
     sync::{mpsc::channel, Mutex},
 };
+use tracing::{debug, error, info, warn};
 
 pub struct Esl;
 
@@ -40,12 +41,12 @@ impl Esl {
                 let n = match read_half.read(&mut buf).await {
                     Ok(n) => n,
                     Err(e) => {
-                        log::error!("read event error: {:#?}", e);
+                        error!("read event error: {:#?}", e);
                         break;
                     }
                 };
                 if n == 0 {
-                    log::error!("read error, empty data");
+                    error!("read error, empty data");
                     break;
                 }
                 all_buf.extend_from_slice(&buf[..n]);
@@ -60,12 +61,12 @@ impl Esl {
                 let headers = parse_header(header);
                 let header = String::from_utf8_lossy(header).to_string();
 
-                log::debug!("all_buf: {:?}", String::from_utf8_lossy(&all_buf));
+                debug!("all_buf: {:?}", String::from_utf8_lossy(&all_buf));
                 let body = if let Some(content_length) = headers.get("Content-Length") {
                     let content_length = match content_length.trim().parse::<usize>() {
                         Ok(content_length) => content_length,
                         Err(e) => {
-                            log::error!("parse content_length error: {}", e);
+                            error!("parse content_length error: {}", e);
                             break;
                         }
                     };
@@ -107,7 +108,7 @@ impl Esl {
                     *auth_err = Ok(());
                     let mut authed = authed1.lock().await;
                     *authed = true;
-                    log::debug!("auth success");
+                    debug!("auth success");
                 } else if header.contains("text/rude-rejection") {
                     let mut authed = authed1.lock().await;
                     if !*authed {
@@ -118,34 +119,34 @@ impl Esl {
                     }
                 }
 
-                log::debug!("raw header: {:?}", header);
-                log::debug!("raw body: {:?}", body);
+                debug!("raw header: {:?}", header);
+                debug!("raw body: {:?}", body);
                 let evt = EventData::new(headers, body).into();
                 if let Err(e) = event_tx.send(Ok(evt)).await {
-                    log::error!("send event error: {}", e);
+                    error!("send event error: {}", e);
                     break;
                 };
             }
-            log::debug!("event channel closed");
+            debug!("event channel closed");
             if let Err(e) = event_tx
                 .send(Err(EslError::ConnectionError(
                     "event channel closed".to_string(),
                 )))
                 .await
             {
-                log::error!("send event error: {}", e);
+                error!("send event error: {}", e);
             };
             event_tx.closed().await;
-            log::debug!("event channel closed success");
+            debug!("event channel closed success");
         });
 
         tokio::spawn(async move {
             loop {
                 let command = command_rx.recv().await.expect("receive command error");
 
-                log::debug!("send command: {}", command);
+                debug!("send command: {}", command);
                 if let Err(e) = write_half.write(command.as_bytes()).await {
-                    log::error!("write command error: {}", e);
+                    error!("write command error: {}", e);
                     break;
                 };
             }
@@ -155,7 +156,7 @@ impl Esl {
                 )))
                 .await
             {
-                log::error!("write command error event: {}", e);
+                error!("write command error event: {}", e);
             };
             event_tx1.closed().await;
         });
@@ -174,7 +175,7 @@ impl Esl {
         if let Err(e) = auth_err.clone() {
             return Err(e);
         }
-        log::info!("auth success");
+        info!("auth success");
         Ok(conn)
     }
 }
@@ -185,7 +186,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_inbound() {
-        env_logger::init();
 
         let conn = Esl::inbound("47.97.119.174:8021", "admin888")
             .await
@@ -200,7 +200,7 @@ mod tests {
         //     }
         // });
 
-        // log::debug!("send");
+        // debug!("send");
         // conn.lock().await.send("event json ALL").await.unwrap();
         // conn.lock()
         //     .await

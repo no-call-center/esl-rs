@@ -1,4 +1,3 @@
-use env_logger::Env;
 use esl_rs::run;
 use esl_rs::{self, Esl};
 use std::collections::HashMap;
@@ -6,17 +5,17 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 async fn main() {
-    let target = Box::new(File::create("./tmp.log").expect("Can't create file"));
-    env_logger::Builder::from_env(Env::default().default_filter_or("error"))
-        // save to file
-        .format(|buf, record| writeln!(buf, "{} - {}", record.level(), record.args()))
-        .filter(None, log::LevelFilter::Debug)
-        .write_style(env_logger::WriteStyle::Always)
-        .target(env_logger::Target::Pipe(target))
-        .init();
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set the global default subscriber");
 
     let mut conns = HashMap::new();
 
@@ -25,14 +24,14 @@ async fn main() {
         let conn = match Esl::inbound(fs1, "admin888").await {
             Ok(conn) => conn,
             Err(e) => {
-                log::error!("connect error: {}", e);
+                error!("connect error: {}", e);
                 continue;
             }
         };
 
         conns.insert(fs1, Arc::new(Mutex::new(conn)));
 
-        log::debug!("send");
+        debug!("send");
 
         let conn = match conns.get(fs1) {
             Some(conn) => conn.clone(),
@@ -68,10 +67,10 @@ async fn main() {
             ))
             .await
             .unwrap();
-        log::debug!("r: {:?}", r);
+        debug!("r: {:?}", r);
 
         let result = run!(conn);
-        log::error!("result: {:?}", result);
+        error!("result: {:?}", result);
         conns.remove(fs1);
     }
 }
